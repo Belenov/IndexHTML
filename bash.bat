@@ -15,11 +15,50 @@ if ! ($DIALOG --clear --title  "StopPhish | Installation" --no-button "Cancel" -
     exit;
 fi
 
+### Установка Kubernetes ###
+install_k8s() {
+  echo "Installing Kubernetes"
+
+  apt-get update
+  apt-get install -y apt-transport-https ca-certificates curl
+
+  curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+  cat <<EOF >/etc/apt/sources.list.d/kubernetes.list
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+  # Установка пакетов 
+  apt-get update
+  apt-get install -y kubelet kubeadm kubectl
+  apt-mark hold kubelet kubeadm kubectl
+
+  echo "Initializing Kubernetes cluster..."
+  kubeadm init --pod-network-cidr=10.244.0.0/16
+
+  mkdir -p $HOME/.kube
+  cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+  echo "Installing Flannel CNI (networking plugin)..."
+  kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+  kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true
+}
+
+# Проверка
+if ! command -v kubeadm &> /dev/null; then
+  install_k8s
+else
+  echo "Kubernetes (k8s) is already installed, skipping installation"
+fi
+
+# Проверка
 if ! command -v kubectl &> /dev/null; then
     echo "kubectl not found. Please install kubectl and ensure it is in your PATH."
     exit 1
 fi
 
+# Проверка на доступность
 if ! kubectl version &> /dev/null; then
     echo "Unable to connect to Kubernetes cluster. Ensure kubeconfig is properly configured."
     exit 1
@@ -47,6 +86,7 @@ else
   kubectl apply -f "$BASE_URL/mirror/cert-manager/$CERT_MANAGER_VERSION/cert-manager.yaml"
 fi
 
+# Бэкап существующей конфигурации базы данных StopPhish
 if [[ $(kubectl get cm -n stopphish stopphish-db --ignore-not-found) ]]; then
   echo "Backing up existing database configuration"
   kubectl get cm -n stopphish stopphish-db -o yaml > $(date "+%Y-%m-%d_%H-%M-%S")-stopphish-db.yaml
@@ -85,3 +125,4 @@ $DIALOG --title "StopPhish | Congratulations" --msgbox "Installation complete! \
 echo -e "\n\n+-------------------------------+\n|     Installation complete!    |\n+-------------------------------+\n"
 echo -e "You can now login to:\n  URL :  http://localhost:80 \n  User:  admin@admin.com\n  Pass:  admin\n"
 echo -e "* You may now exit the console. *\n"
+
